@@ -1,12 +1,22 @@
-ARG ARCH="amd64"
-ARG OS="linux"
-FROM quay.io/prometheus/busybox-${OS}-${ARCH}:latest
-LABEL maintainer="The Prometheus Authors <prometheus-developers@googlegroups.com>"
+FROM golang:1.18-bullseye as builder
 
-ARG ARCH="amd64"
-ARG OS="linux"
-COPY .build/${OS}-${ARCH}/mysqld_exporter /bin/mysqld_exporter
+RUN apt-get update && apt-get install -y \
+        build-essential \
+        g++ \
+        make \
+        git \
+        mariadb-server
 
-EXPOSE      9104
-USER        nobody
-ENTRYPOINT  [ "/bin/mysqld_exporter" ]
+RUN mkdir /build \
+  && cd /build \
+  && git clone https://github.com/peak/mysqld_exporter.git \
+  && cd /build/mysqld_exporter \
+  && git checkout v0.14.1
+
+RUN service mariadb start \
+    && mysql -u root -e "CREATE OR REPLACE USER 'root'@'localhost' IDENTIFIED BY ''; GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION; FLUSH PRIVILEGES;" \
+    && cd /build/mysqld_exporter \
+    && make
+
+FROM quay.io/prometheus/busybox-linux-amd64:latest
+COPY --from=builder /build/mysqld_exporter/mysqld_exporter /usr/local/bin/mysqld_exporter
